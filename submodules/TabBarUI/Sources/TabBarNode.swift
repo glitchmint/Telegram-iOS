@@ -8,6 +8,11 @@ import AnimatedStickerNode
 import TelegramAnimatedStickerNode
 import TelegramPresentationData
 
+private let liquidGlassEnabled = true
+private let liquidGlassLensHeight: CGFloat = 36.0
+private let liquidGlassLensCornerRadius: CGFloat = 18.0
+private let liquidGlassLensPadding: CGFloat = 16.0
+
 private extension CGRect {
     var center: CGPoint {
         return CGPoint(x: self.midX, y: self.midY)
@@ -88,6 +93,204 @@ private func tabBarItemImage(_ image: UIImage?, title: String, backgroundColor: 
 
 private let badgeFont = Font.regular(13.0)
 
+private final class LiquidGlassLensView: UIView {
+    private let blurView: UIVisualEffectView
+    private let iridescentGradientLayer = CAGradientLayer()
+    private let specularHighlightLayer = CAGradientLayer()
+    private let innerShadowLayer = CALayer()
+    private let highlightLayer = CALayer()
+    private var isHighlighted: Bool = false
+    
+    override init(frame: CGRect) {
+        let blurEffect = UIBlurEffect(style: .light)
+        self.blurView = UIVisualEffectView(effect: blurEffect)
+        self.blurView.isUserInteractionEnabled = false
+        
+        super.init(frame: frame)
+        
+        self.clipsToBounds = false
+        self.layer.cornerRadius = liquidGlassLensCornerRadius
+        
+        self.addSubview(blurView)
+        blurView.clipsToBounds = true
+        blurView.layer.cornerRadius = liquidGlassLensCornerRadius
+        
+        for subview in blurView.subviews {
+            if subview.description.contains("VisualEffectSubview") {
+                subview.isHidden = true
+            }
+        }
+        
+        if let sublayer = blurView.layer.sublayers?.first, let filters = sublayer.filters {
+            sublayer.backgroundColor = nil
+            sublayer.isOpaque = false
+            let allowedKeys: [String] = ["gaussianBlur", "colorSaturate"]
+            sublayer.filters = filters.filter { filter in
+                guard let filter = filter as? NSObject else { return true }
+                let filterName = String(describing: filter)
+                if !allowedKeys.contains(filterName) {
+                    return false
+                }
+                if filterName == "gaussianBlur" {
+                    filter.setValue(12.0 as NSNumber, forKey: "inputRadius")
+                }
+                return true
+            }
+        }
+        
+        iridescentGradientLayer.type = .conic
+        iridescentGradientLayer.colors = [
+            UIColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 0.15).cgColor,
+            UIColor(red: 0.6, green: 0.4, blue: 1.0, alpha: 0.12).cgColor,
+            UIColor(red: 1.0, green: 0.4, blue: 0.8, alpha: 0.10).cgColor,
+            UIColor(red: 1.0, green: 0.8, blue: 0.4, alpha: 0.12).cgColor,
+            UIColor(red: 0.4, green: 1.0, blue: 0.6, alpha: 0.15).cgColor,
+            UIColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 0.15).cgColor
+        ]
+        iridescentGradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        iridescentGradientLayer.endPoint = CGPoint(x: 0.5, y: 0.0)
+        iridescentGradientLayer.cornerRadius = liquidGlassLensCornerRadius
+        iridescentGradientLayer.masksToBounds = true
+        layer.addSublayer(iridescentGradientLayer)
+        
+        specularHighlightLayer.colors = [
+            UIColor(white: 1.0, alpha: 0.35).cgColor,
+            UIColor(white: 1.0, alpha: 0.1).cgColor,
+            UIColor(white: 1.0, alpha: 0.0).cgColor
+        ]
+        specularHighlightLayer.locations = [0.0, 0.3, 1.0]
+        specularHighlightLayer.startPoint = CGPoint(x: 0.5, y: 0.0)
+        specularHighlightLayer.endPoint = CGPoint(x: 0.5, y: 0.6)
+        specularHighlightLayer.cornerRadius = liquidGlassLensCornerRadius
+        specularHighlightLayer.masksToBounds = true
+        layer.addSublayer(specularHighlightLayer)
+        
+        highlightLayer.backgroundColor = UIColor(white: 1.0, alpha: 0.2).cgColor
+        highlightLayer.opacity = 0
+        highlightLayer.cornerRadius = liquidGlassLensCornerRadius
+        layer.addSublayer(highlightLayer)
+        
+        layer.borderWidth = 0.5
+        layer.borderColor = UIColor(white: 1.0, alpha: 0.3).cgColor
+        
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOffset = CGSize(width: 0, height: 4)
+        layer.shadowRadius = 12
+        layer.shadowOpacity = 0.2
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        blurView.frame = bounds
+        iridescentGradientLayer.frame = bounds
+        specularHighlightLayer.frame = bounds
+        highlightLayer.frame = bounds
+        
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: liquidGlassLensCornerRadius).cgPath
+    }
+    
+    func animateToFrame(_ targetFrame: CGRect, fromIndex: Int, toIndex: Int, animated: Bool) {
+        if animated {
+            let fromFrame = self.frame
+            let midX = (fromFrame.midX + targetFrame.midX) / 2.0
+            let stretchWidth = abs(targetFrame.midX - fromFrame.midX) + max(fromFrame.width, targetFrame.width)
+            
+            UIView.animateKeyframes(withDuration: 0.35, delay: 0, options: [.calculationModeCubic], animations: {
+                UIView.addKeyframe(withRelativeStartTime: 0.0, relativeDuration: 0.4) {
+                    let stretchFrame = CGRect(
+                        x: midX - stretchWidth / 2.0,
+                        y: targetFrame.origin.y,
+                        width: stretchWidth,
+                        height: targetFrame.height * 0.92
+                    )
+                    self.frame = stretchFrame
+                    self.layer.cornerRadius = liquidGlassLensCornerRadius * 0.85
+                    self.blurView.layer.cornerRadius = liquidGlassLensCornerRadius * 0.85
+                    self.iridescentGradientLayer.cornerRadius = liquidGlassLensCornerRadius * 0.85
+                    self.specularHighlightLayer.cornerRadius = liquidGlassLensCornerRadius * 0.85
+                    self.highlightLayer.cornerRadius = liquidGlassLensCornerRadius * 0.85
+                }
+                
+                UIView.addKeyframe(withRelativeStartTime: 0.4, relativeDuration: 0.6) {
+                    self.frame = targetFrame
+                    self.layer.cornerRadius = liquidGlassLensCornerRadius
+                    self.blurView.layer.cornerRadius = liquidGlassLensCornerRadius
+                    self.iridescentGradientLayer.cornerRadius = liquidGlassLensCornerRadius
+                    self.specularHighlightLayer.cornerRadius = liquidGlassLensCornerRadius
+                    self.highlightLayer.cornerRadius = liquidGlassLensCornerRadius
+                }
+            }, completion: { _ in
+                UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.6, initialSpringVelocity: 0.5, options: [], animations: {
+                    self.transform = .identity
+                }, completion: nil)
+            })
+            
+            let gradientAnimation = CABasicAnimation(keyPath: "transform.rotation.z")
+            gradientAnimation.fromValue = 0
+            gradientAnimation.toValue = toIndex > fromIndex ? CGFloat.pi / 6 : -CGFloat.pi / 6
+            gradientAnimation.duration = 0.35
+            gradientAnimation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            gradientAnimation.autoreverses = true
+            iridescentGradientLayer.add(gradientAnimation, forKey: "rotation")
+        } else {
+            self.frame = targetFrame
+        }
+    }
+    
+    func animateHighlight(_ highlighted: Bool) {
+        guard isHighlighted != highlighted else { return }
+        isHighlighted = highlighted
+        
+        if highlighted {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.1)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+            highlightLayer.opacity = 1.0
+            CATransaction.commit()
+            
+            UIView.animate(withDuration: 0.1, delay: 0, options: [.curveEaseOut, .allowUserInteraction], animations: {
+                self.transform = CGAffineTransform(scaleX: 0.94, y: 0.94).translatedBy(x: 0, y: 1)
+            }, completion: nil)
+        } else {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.15)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeIn))
+            highlightLayer.opacity = 0.0
+            CATransaction.commit()
+            
+            UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.55, initialSpringVelocity: 0.8, options: [.allowUserInteraction], animations: {
+                self.transform = .identity
+            }, completion: nil)
+        }
+    }
+    
+    func animateSelection() {
+        UIView.animate(withDuration: 0.08, delay: 0, options: [.curveEaseOut], animations: {
+            self.transform = CGAffineTransform(scaleX: 0.96, y: 0.96)
+        }, completion: { _ in
+            UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.5, initialSpringVelocity: 1.0, options: [], animations: {
+                self.transform = .identity
+            }, completion: nil)
+        })
+    }
+    
+    func animateBounce() {
+        let bounceTransform = CGAffineTransform(scaleX: 1.08, y: 1.08)
+        
+        UIView.animate(withDuration: 0.1, delay: 0, options: [.curveEaseOut], animations: {
+            self.transform = bounceTransform
+        }, completion: { _ in
+            UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.45, initialSpringVelocity: 1.2, options: [], animations: {
+                self.transform = .identity
+            }, completion: nil)
+        })
+    }
+}
+
 private final class TabBarItemNode: ASDisplayNode {
     let extractedContainerNode: ContextExtractedContentContainingNode
     let containerNode: ContextControllerSourceNode
@@ -111,7 +314,7 @@ private final class TabBarItemNode: ASDisplayNode {
         }
     }
     
-    var swiped: ((TabBarItemSwipeDirection) -> Void)?
+        var swiped: ((TabBarItemSwipeDirection) -> Void)?
     
     var pointerInteraction: PointerInteraction?
     
@@ -178,12 +381,12 @@ private final class TabBarItemNode: ASDisplayNode {
             transition.updateAlpha(node: strongSelf.imageNode, alpha: isExtracted ? 0.0 : 1.0)
             transition.updateAlpha(node: strongSelf.animationNode, alpha: isExtracted ? 0.0 : 1.0)
             transition.updateAlpha(node: strongSelf.textImageNode, alpha: isExtracted ? 0.0 : 1.0)
-            transition.updateAlpha(node: strongSelf.contextImageNode, alpha: isExtracted ? 1.0 : 0.0)
-            transition.updateAlpha(node: strongSelf.contextTextImageNode, alpha: isExtracted ? 1.0 : 0.0)
+                transition.updateAlpha(node: strongSelf.contextImageNode, alpha: isExtracted ? 1.0 : 0.0)
+                transition.updateAlpha(node: strongSelf.contextTextImageNode, alpha: isExtracted ? 1.0 : 0.0)
+            }
         }
-    }
     
-    override func didLoad() {
+        override func didLoad() {
         super.didLoad()
         
         self.pointerInteraction = PointerInteraction(node: self, style: .rectangle(CGSize(width: 90.0, height: 50.0)))
@@ -351,45 +554,56 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
     
     private var badgeImage: UIImage
 
-    let backgroundNode: NavigationBackgroundNode
-    private var tabBarNodeContainers: [TabBarNodeContainer] = []
+        let backgroundNode: NavigationBackgroundNode
+        private var tabBarNodeContainers: [TabBarNodeContainer] = []
     
-    private var tapRecognizer: TapLongTapOrDoubleTapGestureRecognizer?
+        private var tapRecognizer: TapLongTapOrDoubleTapGestureRecognizer?
     
-    init(theme: PresentationTheme, itemSelected: @escaping (Int, Bool, [ASDisplayNode]) -> Void, contextAction: @escaping (Int, ContextExtractedContentContainingNode, ContextGesture) -> Void, swipeAction: @escaping (Int, TabBarItemSwipeDirection) -> Void) {
-        self.itemSelected = itemSelected
-        self.contextAction = contextAction
-        self.swipeAction = swipeAction
-        self.theme = theme
+        private var sharedLiquidGlassLens: LiquidGlassLensView?
+        private var tabItemFrames: [Int: CGRect] = [:]
+    
+        init(theme: PresentationTheme, itemSelected: @escaping (Int, Bool, [ASDisplayNode]) -> Void, contextAction: @escaping (Int, ContextExtractedContentContainingNode, ContextGesture) -> Void, swipeAction: @escaping (Int, TabBarItemSwipeDirection) -> Void) {
+            self.itemSelected = itemSelected
+            self.contextAction = contextAction
+            self.swipeAction = swipeAction
+            self.theme = theme
 
-        self.backgroundNode = NavigationBackgroundNode(color: theme.rootController.tabBar.backgroundColor)
+            self.backgroundNode = NavigationBackgroundNode(color: theme.rootController.tabBar.backgroundColor)
         
-        self.badgeImage = generateStretchableFilledCircleImage(diameter: 18.0, color: theme.rootController.tabBar.badgeBackgroundColor, strokeColor: theme.rootController.tabBar.badgeStrokeColor, strokeWidth: 1.0, backgroundColor: nil)!
+            self.badgeImage = generateStretchableFilledCircleImage(diameter: 18.0, color: theme.rootController.tabBar.badgeBackgroundColor, strokeColor: theme.rootController.tabBar.badgeStrokeColor, strokeWidth: 1.0, backgroundColor: nil)!
         
-        super.init()
+            super.init()
         
-        self.isAccessibilityContainer = false
-        self.accessibilityTraits = [.tabBar]
+            self.isAccessibilityContainer = false
+            self.accessibilityTraits = [.tabBar]
         
-        self.isOpaque = false
-        self.backgroundColor = nil
+            self.isOpaque = false
+            self.backgroundColor = nil
         
-        self.isExclusiveTouch = true
+            self.isExclusiveTouch = true
 
-        self.addSubnode(self.backgroundNode)
-    }
-    
-    override func didLoad() {
-        super.didLoad()
-        
-        let recognizer = TapLongTapOrDoubleTapGestureRecognizer(target: self, action: #selector(self.tapLongTapOrDoubleTapGesture(_:)))
-        recognizer.delegate = self.wrappedGestureRecognizerDelegate
-        recognizer.tapActionAtPoint = { _ in
-            return .keepWithSingleTap
+            self.addSubnode(self.backgroundNode)
         }
-        self.tapRecognizer = recognizer
-        self.view.addGestureRecognizer(recognizer)
-    }
+    
+        override func didLoad() {
+            super.didLoad()
+        
+            let recognizer = TapLongTapOrDoubleTapGestureRecognizer(target: self, action: #selector(self.tapLongTapOrDoubleTapGesture(_:)))
+            recognizer.delegate = self.wrappedGestureRecognizerDelegate
+            recognizer.tapActionAtPoint = { _ in
+                return .keepWithSingleTap
+            }
+            self.tapRecognizer = recognizer
+            self.view.addGestureRecognizer(recognizer)
+        
+            if liquidGlassEnabled {
+                let lensView = LiquidGlassLensView(frame: .zero)
+                lensView.isUserInteractionEnabled = false
+                lensView.alpha = 0
+                self.view.insertSubview(lensView, aboveSubview: self.backgroundNode.view)
+                self.sharedLiquidGlassLens = lensView
+            }
+        }
     
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         if otherGestureRecognizer is UIPanGestureRecognizer {
@@ -527,9 +741,10 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 node.contentWidth = max(contentWidth, imageContentWidth)
                 node.isSelected = false
             }
-            container.badgeBackgroundNode.image = self.badgeImage
-            node.extractedContainerNode.contentNode.addSubnode(container.badgeContainerNode)
-            tabBarNodeContainers.append(container)
+                        container.badgeBackgroundNode.image = self.badgeImage
+                        node.extractedContainerNode.contentNode.addSubnode(container.badgeContainerNode)
+            
+                        tabBarNodeContainers.append(container)
             self.addSubnode(node)
         }
         
@@ -742,7 +957,9 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
                     node.imageNode.position = imageFrame.center
                 }
                 
-                if container.badgeValue != container.appliedBadgeValue {
+                                self.tabItemFrames[i] = nodeFrame
+                
+                                if container.badgeValue != container.appliedBadgeValue {
                     container.appliedBadgeValue = container.badgeValue
                     if let badgeValue = container.badgeValue, !badgeValue.isEmpty {
                         container.badgeTextNode.attributedText = NSAttributedString(string: badgeValue, font: badgeFont, textColor: self.theme.rootController.tabBar.badgeTextColor)
@@ -771,13 +988,50 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
                    
                     container.badgeContainerNode.subnodeTransform = CATransform3DMakeScale(scaleFactor, scaleFactor, 1.0)
                     
-                    container.badgeTextNode.frame = CGRect(origin: CGPoint(x: floorToScreenPixels((backgroundFrame.size.width - badgeSize.width) / 2.0), y: 1.0), size: badgeSize)
+                        container.badgeTextNode.frame = CGRect(origin: CGPoint(x: floorToScreenPixels((backgroundFrame.size.width - badgeSize.width) / 2.0), y: 1.0), size: badgeSize)
+                    }
+                }
+            
+                if liquidGlassEnabled, let lensView = self.sharedLiquidGlassLens, let selectedIndex = self.selectedIndex, let selectedFrame = self.tabItemFrames[selectedIndex] {
+                    let contentWidth = self.tabBarNodeContainers[selectedIndex].imageNode.contentWidth ?? selectedFrame.width
+                    let lensWidth = contentWidth + liquidGlassLensPadding * 2
+                    let lensFrame = CGRect(
+                        x: selectedFrame.midX - lensWidth / 2.0,
+                        y: 1.0,
+                        width: lensWidth,
+                        height: liquidGlassLensHeight
+                    )
+                
+                    if lensView.alpha == 0 {
+                        lensView.frame = lensFrame
+                        UIView.animate(withDuration: 0.2) {
+                            lensView.alpha = 1.0
+                        }
+                    }
                 }
             }
         }
-    }
     
-    private func tapped(at location: CGPoint, longTap: Bool) {
+        private func updateSharedLensPosition(toIndex: Int, fromIndex: Int?, animated: Bool) {
+            guard liquidGlassEnabled, let lensView = self.sharedLiquidGlassLens, let targetFrame = self.tabItemFrames[toIndex] else { return }
+        
+            let contentWidth = self.tabBarNodeContainers[toIndex].imageNode.contentWidth ?? targetFrame.width
+            let lensWidth = contentWidth + liquidGlassLensPadding * 2
+            let lensFrame = CGRect(
+                x: targetFrame.midX - lensWidth / 2.0,
+                y: 1.0,
+                width: lensWidth,
+                height: liquidGlassLensHeight
+            )
+        
+            if let fromIndex = fromIndex, animated {
+                lensView.animateToFrame(lensFrame, fromIndex: fromIndex, toIndex: toIndex, animated: true)
+            } else {
+                lensView.frame = lensFrame
+            }
+        }
+    
+        private func tapped(at location: CGPoint, longTap: Bool) {
         if let bottomInset = self.validLayout?.4 {
             if location.y > self.bounds.size.height - bottomInset {
                 return
@@ -805,6 +1059,15 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 if previousSelectedIndex != closestNode.0 {
                     if let selectedIndex = self.selectedIndex, let _ = self.tabBarItems[selectedIndex].item.animationName {
                         container.imageNode.animationNode.play(firstFrame: false, fromIndex: nil)
+                    }
+                    
+                    if liquidGlassEnabled {
+                        self.updateSharedLensPosition(toIndex: closestNode.0, fromIndex: previousSelectedIndex, animated: true)
+                        self.sharedLiquidGlassLens?.animateSelection()
+                    }
+                } else {
+                    if liquidGlassEnabled {
+                        self.sharedLiquidGlassLens?.animateBounce()
                     }
                 }
             }
